@@ -1,0 +1,27 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: gateway_db
+    ports:
+      - "5455:5432"   # 5455 — порт на твоём компьютере, 5432 — внутри контейнера
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  app:
+    build: .
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql+asyncpg://user:password@db:5432/gateway_db
+
+volumes:
+  pgdata: 
