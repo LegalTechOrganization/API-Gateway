@@ -1,39 +1,101 @@
-from fastapi import APIRouter, status, Query, Body
-from pydantic import BaseModel
+from fastapi import APIRouter, status, Query, Body, Depends
+from pydantic import BaseModel, Field
 from typing import Optional
+from services.microservice_client import microservice_client
 
 router = APIRouter()
 
-class QuotaCheckResponse(BaseModel):
+# Pydantic модели для запросов
+class CheckBalanceRequest(BaseModel):
+    user_id: str
+    action: str
+    units: float = Field(gt=0, description="Количество единиц (должно быть больше 0)")
+
+class DebitRequest(BaseModel):
+    user_id: str
+    action: str
+    units: float = Field(gt=0, description="Количество единиц (должно быть больше 0)")
+    ref: Optional[str] = None
+    reason: str = Field(..., description="Причина списания")
+
+class CreditRequest(BaseModel):
+    user_id: str
+    action: str
+    units: float = Field(gt=0, description="Количество единиц (должно быть больше 0)")
+    ref: Optional[str] = None
+    reason: str = Field(..., description="Причина пополнения")
+
+class ApplyPlanRequest(BaseModel):
+    user_id: str
+    plan_id: str
+
+# Pydantic модели для ответов
+class CheckBalanceResponse(BaseModel):
     allowed: bool
-    remain: float
+    balance: float
 
-class QuotaDebitRequest(BaseModel):
-    user_id: str
-    action: str
-    units: float
-    ref: Optional[str] = None
+class DebitResponse(BaseModel):
+    balance: float
+    tx_id: str
 
-class QuotaDebitResponse(BaseModel):
-    remain: float
+class CreditResponse(BaseModel):
+    balance: float
+    tx_id: str
 
-class QuotaCreditRequest(BaseModel):
-    user_id: str
-    action: str
-    units: float
-    ref: Optional[str] = None
+class BalanceResponse(BaseModel):
+    balance: float
+    plan: dict
 
-class QuotaCreditResponse(BaseModel):
-    remain: float
+class ApplyPlanResponse(BaseModel):
+    plan_id: str
+    new_balance: float
 
-@router.get("/billing/quota/check", response_model=QuotaCheckResponse)
-def quota_check(user_id: str = Query(...), action: str = Query(...), units: float = Query(...)):
-    return {"allowed": True, "remain": 41.0}
+@router.post("/billing/quota/check", response_model=CheckBalanceResponse)
+async def quota_check(request: CheckBalanceRequest):
+    """Проксирует запрос проверки баланса к микросервису billing"""
+    return await microservice_client.proxy_request(
+        service_name="billing",
+        method="POST",
+        path="/internal/billing/check",
+        data=request.dict()
+    )
 
-@router.post("/billing/quota/debit", response_model=QuotaDebitResponse)
-def quota_debit(req: QuotaDebitRequest):
-    return {"remain": 40.0}
+@router.post("/billing/quota/debit", response_model=DebitResponse)
+async def quota_debit(request: DebitRequest):
+    """Проксирует запрос списания средств к микросервису billing"""
+    return await microservice_client.proxy_request(
+        service_name="billing",
+        method="POST",
+        path="/internal/billing/debit",
+        data=request.dict()
+    )
 
-@router.post("/billing/quota/credit", response_model=QuotaCreditResponse)
-def quota_credit(req: QuotaCreditRequest):
-    return {"remain": 50.0} 
+@router.post("/billing/quota/credit", response_model=CreditResponse)
+async def quota_credit(request: CreditRequest):
+    """Проксирует запрос пополнения баланса к микросервису billing"""
+    return await microservice_client.proxy_request(
+        service_name="billing",
+        method="POST",
+        path="/internal/billing/credit",
+        data=request.dict()
+    )
+
+@router.get("/billing/balance", response_model=BalanceResponse)
+async def get_balance(user_id: str = Query(..., description="ID пользователя")):
+    """Проксирует запрос получения баланса к микросервису billing"""
+    return await microservice_client.proxy_request(
+        service_name="billing",
+        method="GET",
+        path="/internal/billing/balance",
+        params={"user_id": user_id}
+    )
+
+@router.post("/billing/plan/apply", response_model=ApplyPlanResponse)
+async def apply_plan(request: ApplyPlanRequest):
+    """Проксирует запрос применения плана к микросервису billing"""
+    return await microservice_client.proxy_request(
+        service_name="billing",
+        method="POST",
+        path="/internal/billing/plan/apply",
+        data=request.dict()
+    ) 
