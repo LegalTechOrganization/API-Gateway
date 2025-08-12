@@ -9,4 +9,4 @@ python-multipart
 email-validator
 httpx
 kafka-python
-aiokafka 
+aiokafka

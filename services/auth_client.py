@@ -41,7 +41,7 @@ class AuthServiceClient:
             except httpx.HTTPStatusError as e:
                 raise HTTPException(
                     status_code=e.response.status_code,
-                    detail=f"Auth service error: {e.response.text}"
+                    detail=f"Auth service error: {e.response.text} ---- {url}"
                 )
             except httpx.RequestError as e:
                 raise HTTPException(
@@ -57,7 +57,7 @@ class AuthServiceClient:
             "password": password,
             "full_name": full_name
         }
-        return await self._make_request("POST", "/sign-up", data)
+        return await self._make_request("POST", "/v1/client/sign-up", data)
 
     async def sign_in(self, email: str, password: str) -> Dict[str, Any]:
         """Вход пользователя"""
@@ -65,33 +65,33 @@ class AuthServiceClient:
             "email": email,
             "password": password
         }
-        return await self._make_request("POST", "/sign-in/password", data)
+        return await self._make_request("POST", "/v1/client/sign-in/password", data)
 
     async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         """Обновление токена"""
         data = {"refresh_token": refresh_token}
-        return await self._make_request("POST", "/refresh_token", data)
+        return await self._make_request("POST", "/v1/client/refresh_token", data)
 
     async def logout(self, refresh_token: str) -> None:
         """Выход пользователя"""
         data = {"refresh_token": refresh_token}
-        await self._make_request("POST", "/logout", data)
+        await self._make_request("POST", "/v1/client/logout", data)
 
     async def validate_token(self, token: str) -> Dict[str, Any]:
         """Валидация JWT токена"""
-        return await self._make_request("GET", f"/validate?token={token}")
+        return await self._make_request("GET", f"/v1/client/validate?token={token}")
 
     # User endpoints
     async def get_user_info(self, token: str) -> Dict[str, Any]:
         """Получить информацию о пользователе"""
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("GET", "/me", headers=headers)
+        return await self._make_request("GET", "/v1/client/me", headers=headers)
 
     async def switch_organization(self, org_id: str, token: str) -> Dict[str, Any]:
         """Переключить активную организацию"""
         data = {"org_id": org_id}
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("PATCH", "/switch-org", data, headers)
+        return await self._make_request("PATCH", "/v1/client/switch-org", data, headers)
 
     # Organization endpoints
     async def create_organization(self, name: str, slug: Optional[str], token: str) -> Dict[str, Any]:
@@ -100,41 +100,41 @@ class AuthServiceClient:
         if slug:
             data["slug"] = slug
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("POST", "", data, headers)
+        return await self._make_request("POST", "/v1/org", data, headers)
 
     async def get_organization_info(self, org_id: str, token: str) -> Dict[str, Any]:
         """Получить информацию об организации"""
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("GET", f"/{org_id}", headers=headers)
+        return await self._make_request("GET", f"/v1/org/{org_id}", headers=headers)
 
     async def get_organization_members(self, org_id: str, token: str) -> Dict[str, Any]:
         """Получить список участников организации"""
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("GET", f"/{org_id}/members", headers=headers)
+        return await self._make_request("GET", f"/v1/org/{org_id}/members", headers=headers)
 
     async def invite_user(self, org_id: str, email: str, role: str, token: str) -> Dict[str, Any]:
         """Пригласить пользователя в организацию"""
         data = {"email": email, "role": role}
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("POST", f"/{org_id}/invite", data, headers)
+        return await self._make_request("POST", f"/v1/org/{org_id}/invite", data, headers)
 
     async def remove_member(self, org_id: str, user_id: str, token: str) -> None:
         """Удалить участника из организации"""
         headers = {"Authorization": f"Bearer {token}"}
-        await self._make_request("DELETE", f"/{org_id}/member/{user_id}", headers=headers)
+        await self._make_request("DELETE", f"/v1/org/{org_id}/member/{user_id}", headers=headers)
 
     async def update_member_role(self, org_id: str, user_id: str, role: str, token: str) -> Dict[str, Any]:
         """Обновить роль участника"""
         data = {"role": role}
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("PATCH", f"/{org_id}/member/{user_id}/role", data, headers)
+        return await self._make_request("PATCH", f"/v1/org/{org_id}/member/{user_id}/role", data, headers)
 
     # Invite endpoints
     async def accept_invite(self, invite_token: str, token: str) -> Dict[str, Any]:
         """Принять приглашение в организацию"""
         data = {"invite_token": invite_token}
         headers = {"Authorization": f"Bearer {token}"}
-        return await self._make_request("POST", "/accept", data, headers)
+        return await self._make_request("POST", "/v1/invite/accept", data, headers)
 
 
 # Глобальный экземпляр клиента

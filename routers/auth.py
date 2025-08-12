@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi.responses import JSONResponse
 from services.auth_client import auth_client
 from services.kafka_service import send_auth_event, send_user_event, send_organization_event
+from utils.jwt_utils import transform_auth_response, transform_generic_response
 
 router = APIRouter()
 
@@ -136,7 +137,10 @@ class MemberShortInfo(BaseModel):
 async def sign_up(data: SignUpRequest):
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.sign_up(data.email, data.password, "")
+        auth_result = await auth_client.sign_up(data.email, data.password, "")
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_auth_response(auth_result, data.email)
         
         # Отправляем событие в Kafka
         await send_auth_event("user_registered", {
@@ -157,7 +161,10 @@ async def sign_up(data: SignUpRequest):
 async def sign_in(data: SignInRequest):
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.sign_in(data.email, data.password)
+        auth_result = await auth_client.sign_in(data.email, data.password)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_auth_response(auth_result, data.email)
         
         # Отправляем событие в Kafka
         await send_auth_event("user_logged_in", {
@@ -178,7 +185,13 @@ async def sign_in(data: SignInRequest):
 async def refresh_token(data: RefreshTokenRequest):
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.refresh_token(data.refresh_token)
+        auth_result = await auth_client.refresh_token(data.refresh_token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = {
+            "jwt": auth_result.get("access_token"),
+            "refresh_token": auth_result.get("refresh_token")
+        }
         
         # Отправляем событие в Kafka
         await send_auth_event("token_refreshed", {
@@ -227,8 +240,19 @@ async def get_me(authorization: str = Header(None)):
     token = authorization.replace("Bearer ", "")
     
     try:
-        # Проксируем запрос к auth-service
-        result = await auth_client.get_user_info(token)
+        # Сначала валидируем токен
+        validation_result = await auth_client.validate_token(token)
+        if not validation_result.get("valid", False):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired token"
+            )
+        
+        # Затем получаем информацию о пользователе
+        auth_result = await auth_client.get_user_info(token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "user")
         
         # Отправляем событие в Kafka
         await send_user_event("user_info_requested", {
@@ -257,7 +281,10 @@ async def switch_org(data: SwitchOrgRequest, authorization: str = Header(None)):
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.switch_organization(data.org_id, token)
+        auth_result = await auth_client.switch_organization(data.org_id, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "switch_org")
         
         # Отправляем событие в Kafka
         await send_user_event("organization_switched", {
@@ -286,7 +313,10 @@ async def create_org(data: CreateOrgRequest, authorization: str = Header(None)):
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.create_organization(data.name, data.slug, token)
+        auth_result = await auth_client.create_organization(data.name, data.slug, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "org")
         
         # Отправляем событие в Kafka
         await send_organization_event("organization_created", {
@@ -316,7 +346,10 @@ async def invite(id: str, data: InviteRequest, authorization: str = Header(None)
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.invite_user(id, data.email, data.role, token)
+        auth_result = await auth_client.invite_user(id, data.email, data.role, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result)
         
         # Отправляем событие в Kafka
         await send_organization_event("user_invited", {
@@ -347,7 +380,10 @@ async def accept_invite(data: AcceptInviteRequest, authorization: str = Header(N
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.accept_invite(data.invite_token, token)
+        auth_result = await auth_client.accept_invite(data.invite_token, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result)
         
         # Отправляем событие в Kafka
         await send_organization_event("invite_accepted", {
@@ -378,7 +414,10 @@ async def org_members(id: str, authorization: str = Header(None)):
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.get_organization_members(id, token)
+        auth_result = await auth_client.get_organization_members(id, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "user_list")
         
         # Отправляем событие в Kafka
         await send_organization_event("members_listed", {
@@ -438,7 +477,10 @@ async def update_member_role(id: str, user_id: str, data: MemberRoleUpdateReques
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.update_member_role(id, user_id, data.role, token)
+        auth_result = await auth_client.update_member_role(id, user_id, data.role, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result)
         
         # Отправляем событие в Kafka
         await send_organization_event("member_role_updated", {
@@ -457,12 +499,15 @@ async def update_member_role(id: str, user_id: str, data: MemberRoleUpdateReques
         )
 
 
-# --- Internal Endpoints ---
-@router.get("/auth/validate", response_model=JWTValidateResponse)
-async def auth_validate(token: str):
+# --- Client Endpoints ---
+@router.get("/v1/client/validate", response_model=JWTValidateResponse)
+async def validate_token(token: str):
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.validate_token(token)
+        auth_result = await auth_client.validate_token(token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result)
         
         # Отправляем событие в Kafka
         await send_auth_event("token_validated", {
@@ -491,7 +536,10 @@ async def get_user_detail(id: str, authorization: str = Header(None)):
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.get_user_info(token)
+        auth_result = await auth_client.get_user_info(token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "user")
         
         # Отправляем событие в Kafka
         await send_user_event("user_detail_requested", {
@@ -553,7 +601,10 @@ async def get_org_detail(id: str, authorization: str = Header(None)):
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.get_organization_info(id, token)
+        auth_result = await auth_client.get_organization_info(id, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "org")
         
         # Отправляем событие в Kafka
         await send_organization_event("org_detail_requested", {
@@ -582,7 +633,10 @@ async def get_org_members_internal(id: str, authorization: str = Header(None)):
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.get_organization_members(id, token)
+        auth_result = await auth_client.get_organization_members(id, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "user_list")
         
         # Отправляем событие в Kafka
         await send_organization_event("org_members_requested", {
@@ -611,7 +665,10 @@ async def create_org_internal(data: CreateOrgRequest, authorization: str = Heade
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.create_organization(data.name, data.slug, token)
+        auth_result = await auth_client.create_organization(data.name, data.slug, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "org")
         
         # Отправляем событие в Kafka
         await send_organization_event("org_created_internal", {
@@ -641,7 +698,10 @@ async def invite_internal(id: str, data: InviteRequest, authorization: str = Hea
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.invite_user(id, data.email, data.role, token)
+        auth_result = await auth_client.invite_user(id, data.email, data.role, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result)
         
         # Отправляем событие в Kafka
         await send_organization_event("user_invited_internal", {
@@ -672,7 +732,10 @@ async def accept_invite_internal(data: AcceptInviteRequest, authorization: str =
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.accept_invite(data.invite_token, token)
+        auth_result = await auth_client.accept_invite(data.invite_token, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result)
         
         # Отправляем событие в Kafka
         await send_organization_event("invite_accepted_internal", {
@@ -703,7 +766,10 @@ async def switch_org_internal(id: str, data: SwitchOrgRequest, authorization: st
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.switch_organization(data.org_id, token)
+        auth_result = await auth_client.switch_organization(data.org_id, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "switch_org")
         
         # Отправляем событие в Kafka
         await send_user_event("org_switched_internal", {
@@ -733,7 +799,10 @@ async def update_member_role_internal(org_id: str, user_id: str, data: MemberRol
     
     try:
         # Проксируем запрос к auth-service
-        result = await auth_client.update_member_role(org_id, user_id, data.role, token)
+        auth_result = await auth_client.update_member_role(org_id, user_id, data.role, token)
+        
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result)
         
         # Отправляем событие в Kafka
         await send_organization_event("member_role_updated_internal", {
