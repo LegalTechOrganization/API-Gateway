@@ -1,7 +1,6 @@
-version: "3.9"
 services:
   db:
-    image: postgres:15
+    image: postgres:17
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
@@ -10,6 +9,39 @@ services:
       - "5455:5432"   # 5455 — порт на твоём компьютере, 5432 — внутри контейнера
     volumes:
       - pgdata:/var/lib/postgresql/data
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    hostname: kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_DELETE_TOPIC_ENABLE: 'true'
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
 
   # Микросервис billing (раскомментируй, если у тебя есть код)
   # billing:
@@ -21,18 +53,21 @@ services:
   #   depends_on:
   #     - db
 
-  app:
+  api-gateway-app:
     build: .
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn main:app --host 0.0.0.0 --port 8002 --reload
     volumes:
       - .:/app
     ports:
-      - "8000:8000"
+      - "8002:8002"
     depends_on:
       - db
+      - kafka
     environment:
       DATABASE_URL: postgresql+asyncpg://user:password@db:5432/gateway_db
       INTERNAL_SERVICE_KEY: gateway-secret-key-2024
+      AUTH_SERVICE_URL: http://host.docker.internal:8000
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
 
 volumes:
   pgdata: 

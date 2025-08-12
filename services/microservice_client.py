@@ -8,6 +8,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class MicroserviceClient:
     def __init__(self):
         self.base_urls = {
@@ -72,4 +73,4 @@ class MicroserviceClient:
                 raise HTTPException(status_code=503, detail=f"Service {service_name} unavailable")
 
 # Создаём экземпляр клиента
-microservice_client = MicroserviceClient() 
+microservice_client = MicroserviceClient()
