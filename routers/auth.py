@@ -1,12 +1,43 @@
-from fastapi import APIRouter, status, Body, Depends, HTTPException, Header
+from fastapi import APIRouter, status, Body, Depends, HTTPException, Header, Response, Request
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from fastapi.responses import JSONResponse
 from services.auth_client import auth_client
 from services.kafka_service import send_auth_event, send_user_event, send_organization_event
 from utils.jwt_utils import transform_auth_response, transform_generic_response
+from utils.cookie_utils import set_auth_cookies, clear_auth_cookies, get_token_from_request, get_refresh_token_from_request
 
 router = APIRouter()
+
+
+# --- Helper Functions ---
+async def get_token_from_auth_header_or_cookie(request: Request, authorization: str = Header(None)) -> str:
+    """
+    Извлекает токен из заголовка Authorization или из cookie
+    
+    Args:
+        request: FastAPI Request объект
+        authorization: Заголовок Authorization
+        
+    Returns:
+        Токен
+        
+    Raises:
+        HTTPException: Если токен не найден
+    """
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.replace("Bearer ", "")
+    else:
+        token = get_token_from_request(request)
+    
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header or cookie"
+        )
+    
+    return token
 
 
 # --- Pydantic Schemas ---
@@ -134,13 +165,21 @@ class MemberShortInfo(BaseModel):
 
 # --- Public Endpoints ---
 @router.post("/v1/client/sign-up", response_model=SignUpResponse, status_code=status.HTTP_201_CREATED)
-async def sign_up(data: SignUpRequest):
+async def sign_up(data: SignUpRequest, response: Response):
     try:
         # Проксируем запрос к auth-service
         auth_result = await auth_client.sign_up(data.email, data.password, "")
         
         # Преобразуем ответ от auth сервиса в формат API Gateway
         result = transform_auth_response(auth_result, data.email)
+        
+        # Устанавливаем HTTP-Only cookies
+        set_auth_cookies(
+            response=response,
+            access_token=result["jwt"],
+            refresh_token=result["refresh_token"],
+            expires_in=auth_result.get("expires_in", 300)
+        )
         
         # Отправляем событие в Kafka
         await send_auth_event("user_registered", {
@@ -158,13 +197,21 @@ async def sign_up(data: SignUpRequest):
 
 
 @router.post("/v1/client/sign-in/password", response_model=SignInResponse)
-async def sign_in(data: SignInRequest):
+async def sign_in(data: SignInRequest, response: Response):
     try:
         # Проксируем запрос к auth-service
         auth_result = await auth_client.sign_in(data.email, data.password)
         
         # Преобразуем ответ от auth сервиса в формат API Gateway
         result = transform_auth_response(auth_result, data.email)
+        
+        # Устанавливаем HTTP-Only cookies
+        set_auth_cookies(
+            response=response,
+            access_token=result["jwt"],
+            refresh_token=result["refresh_token"],
+            expires_in=auth_result.get("expires_in", 300)
+        )
         
         # Отправляем событие в Kafka
         await send_auth_event("user_logged_in", {
@@ -182,20 +229,38 @@ async def sign_in(data: SignInRequest):
 
 
 @router.post("/v1/client/refresh_token", response_model=RefreshTokenResponse)
-async def refresh_token(data: RefreshTokenRequest):
+async def refresh_token(request: Request, data: RefreshTokenRequest = None, response: Response = None):
     try:
+        # Получаем refresh token из тела запроса или из cookie
+        refresh_token = None
+        if data and data.refresh_token:
+            refresh_token = data.refresh_token
+        else:
+            refresh_token = get_refresh_token_from_request(request)
+        
+        if not refresh_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="No refresh token provided"
+            )
+        
         # Проксируем запрос к auth-service
-        auth_result = await auth_client.refresh_token(data.refresh_token)
+        auth_result = await auth_client.refresh_token(refresh_token)
         
         # Преобразуем ответ от auth сервиса в формат API Gateway
-        result = {
-            "jwt": auth_result.get("access_token"),
-            "refresh_token": auth_result.get("refresh_token")
-        }
+        result = transform_auth_response(auth_result)
+        
+        # Устанавливаем HTTP-Only cookies
+        set_auth_cookies(
+            response=response,
+            access_token=result["jwt"],
+            refresh_token=result["refresh_token"],
+            expires_in=auth_result.get("expires_in", 300)
+        )
         
         # Отправляем событие в Kafka
         await send_auth_event("token_refreshed", {
-            "refresh_token": data.refresh_token[:10] + "..."  # Логируем только часть токена
+            "refresh_token": refresh_token[:10] + "..."  # Логируем только часть токена
         })
         
         return result
@@ -209,14 +274,30 @@ async def refresh_token(data: RefreshTokenRequest):
 
 
 @router.post("/v1/client/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(data: RefreshTokenRequest):
+async def logout(request: Request, data: RefreshTokenRequest = None, response: Response = None):
     try:
+        # Получаем refresh token из тела запроса или из cookie
+        refresh_token = None
+        if data and data.refresh_token:
+            refresh_token = data.refresh_token
+        else:
+            refresh_token = get_refresh_token_from_request(request)
+        
+        if not refresh_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No refresh token provided"
+            )
+        
         # Проксируем запрос к auth-service
-        await auth_client.logout(data.refresh_token)
+        await auth_client.logout(refresh_token)
+        
+        # Очищаем cookies
+        clear_auth_cookies(response)
         
         # Отправляем событие в Kafka
         await send_auth_event("user_logged_out", {
-            "refresh_token": data.refresh_token[:10] + "..."  # Логируем только часть токена
+            "refresh_token": refresh_token[:10] + "..."  # Логируем только часть токена
         })
         
         return None
@@ -230,16 +311,11 @@ async def logout(data: RefreshTokenRequest):
 
 
 @router.get("/v1/client/me", response_model=User)
-async def get_me(authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def get_me(request: Request, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Сначала валидируем токен
         validation_result = await auth_client.validate_token(token)
         if not validation_result.get("valid", False):
@@ -270,16 +346,11 @@ async def get_me(authorization: str = Header(None)):
 
 
 @router.patch("/v1/client/switch-org", response_model=SwitchOrgResponse)
-async def switch_org(data: SwitchOrgRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def switch_org(request: Request, data: SwitchOrgRequest, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Проксируем запрос к auth-service
         auth_result = await auth_client.switch_organization(data.org_id, token)
         
@@ -302,16 +373,11 @@ async def switch_org(data: SwitchOrgRequest, authorization: str = Header(None)):
 
 
 @router.post("/v1/org", response_model=CreateOrgResponse, status_code=status.HTTP_201_CREATED)
-async def create_org(data: CreateOrgRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def create_org(request: Request, data: CreateOrgRequest, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Проксируем запрос к auth-service
         auth_result = await auth_client.create_organization(data.name, data.slug, token)
         
@@ -335,16 +401,11 @@ async def create_org(data: CreateOrgRequest, authorization: str = Header(None)):
 
 
 @router.post("/v1/org/{id}/invite", response_model=InviteResponse)
-async def invite(id: str, data: InviteRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def invite(request: Request, id: str, data: InviteRequest, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Проксируем запрос к auth-service
         auth_result = await auth_client.invite_user(id, data.email, data.role, token)
         
@@ -369,16 +430,11 @@ async def invite(id: str, data: InviteRequest, authorization: str = Header(None)
 
 
 @router.post("/v1/invite/accept", response_model=AcceptInviteResponse)
-async def accept_invite(data: AcceptInviteRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def accept_invite(request: Request, data: AcceptInviteRequest, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Проксируем запрос к auth-service
         auth_result = await auth_client.accept_invite(data.invite_token, token)
         
@@ -403,16 +459,11 @@ async def accept_invite(data: AcceptInviteRequest, authorization: str = Header(N
 
 
 @router.get("/v1/org/{id}/members", response_model=List[OrgMember])
-async def org_members(id: str, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def org_members(request: Request, id: str, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Проксируем запрос к auth-service
         auth_result = await auth_client.get_organization_members(id, token)
         
@@ -436,16 +487,11 @@ async def org_members(id: str, authorization: str = Header(None)):
 
 
 @router.delete("/v1/org/{id}/member/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_member(id: str, user_id: str, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def remove_member(request: Request, id: str, user_id: str, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Проксируем запрос к auth-service
         await auth_client.remove_member(id, user_id, token)
         
@@ -466,16 +512,11 @@ async def remove_member(id: str, user_id: str, authorization: str = Header(None)
 
 
 @router.patch("/v1/org/{id}/member/{user_id}/role", response_model=MemberRoleUpdateResponse)
-async def update_member_role(id: str, user_id: str, data: MemberRoleUpdateRequest, authorization: str = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid authorization header"
-        )
-    
-    token = authorization.replace("Bearer ", "")
-    
+async def update_member_role(request: Request, id: str, user_id: str, data: MemberRoleUpdateRequest, authorization: str = Header(None)):
     try:
+        # Получаем токен из заголовка Authorization или из cookie
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        
         # Проксируем запрос к auth-service
         auth_result = await auth_client.update_member_role(id, user_id, data.role, token)
         
