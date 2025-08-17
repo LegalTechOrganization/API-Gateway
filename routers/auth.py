@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi.responses import JSONResponse
 from services.auth_client import auth_client
 from services.kafka_service import send_auth_event, send_user_event, send_organization_event
+from services.microservice_client import microservice_client
 from utils.jwt_utils import transform_auth_response, transform_generic_response
 from utils.cookie_utils import set_auth_cookies, clear_auth_cookies, get_token_from_request, get_refresh_token_from_request
 
@@ -180,6 +181,14 @@ async def sign_up(data: SignUpRequest, response: Response):
             refresh_token=result["refresh_token"],
             expires_in=auth_result.get("expires_in", 300)
         )
+        
+        # Инициализируем пользователя в billing сервисе
+        await microservice_client.init_user_in_billing(result["jwt"])
+        # try:
+        #     await microservice_client.init_user_in_billing(result["jwt"])
+        # except Exception as billing_error:
+        #     # Логируем ошибку, но не прерываем регистрацию
+        #     print(f"Warning: Failed to initialize user in billing service: {billing_error}")
         
         # Отправляем событие в Kafka
         await send_auth_event("user_registered", {
