@@ -52,6 +52,7 @@ class User(BaseModel):
 class SignUpRequest(BaseModel):
     email: EmailStr
     password: str
+    full_name: str = Field(..., min_length=1, description="Полное имя пользователя")
 
 
 class SignUpResponse(BaseModel):
@@ -169,7 +170,7 @@ class MemberShortInfo(BaseModel):
 async def sign_up(data: SignUpRequest, response: Response):
     try:
         # Проксируем запрос к auth-service
-        auth_result = await auth_client.sign_up(data.email, data.password, "")
+        auth_result = await auth_client.sign_up(data.email, data.password, data.full_name)
         
         # Преобразуем ответ от auth сервиса в формат API Gateway
         result = transform_auth_response(auth_result, data.email)
@@ -181,18 +182,17 @@ async def sign_up(data: SignUpRequest, response: Response):
             refresh_token=result["refresh_token"],
             expires_in=auth_result.get("expires_in", 300)
         )
-        
-        # Инициализируем пользователя в billing сервисе
-        await microservice_client.init_user_in_billing(result["jwt"])
-        # try:
-        #     await microservice_client.init_user_in_billing(result["jwt"])
-        # except Exception as billing_error:
-        #     # Логируем ошибку, но не прерываем регистрацию
-        #     print(f"Warning: Failed to initialize user in billing service: {billing_error}")
+
+        try:
+            await microservice_client.init_user_in_billing(result["jwt"])
+        except Exception as billing_error:
+            # Логируем ошибку, но не прерываем регистрацию
+            print(f"Warning: Failed to initialize user in billing service: {billing_error}")
         
         # Отправляем событие в Kafka
         await send_auth_event("user_registered", {
-            "email": data.email
+            "email": data.email,
+            "full_name": data.full_name
         })
         
         return result
@@ -341,7 +341,8 @@ async def get_me(request: Request, authorization: str = Header(None)):
         
         # Отправляем событие в Kafka
         await send_user_event("user_info_requested", {
-            "user_id": result.get("user_id")
+            "user_id": result.get("user_id"),
+            "full_name": result.get("full_name")
         })
         
         return result
