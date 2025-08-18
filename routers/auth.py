@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from services.auth_client import auth_client
 from services.kafka_service import send_auth_event, send_user_event, send_organization_event
 from services.microservice_client import microservice_client
-from utils.jwt_utils import transform_auth_response, transform_generic_response
+from utils.jwt_utils import transform_auth_response, transform_generic_response, extract_user_info_from_token
 from utils.cookie_utils import set_auth_cookies, clear_auth_cookies, get_token_from_request, get_refresh_token_from_request
 
 router = APIRouter()
@@ -123,6 +123,15 @@ class MemberRoleUpdateRequest(BaseModel):
 class MemberRoleUpdateResponse(BaseModel):
     user_id: str
     new_role: str
+
+
+class UpdateUserRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, description="Новое полное имя пользователя")
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=1)
 
 
 class OrgMember(BaseModel):
@@ -346,6 +355,54 @@ async def get_me(request: Request, authorization: str = Header(None)):
         })
         
         return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.patch("/v1/client/update", response_model=User)
+async def update_user_info(request: Request, data: UpdateUserRequest, authorization: str = Header(None)):
+    try:
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        # Проксируем запрос к auth-service
+        auth_result = await auth_client.update_user_info(data.full_name, token)
+
+        # Преобразуем ответ от auth сервиса в формат API Gateway
+        result = transform_generic_response(auth_result, "user")
+
+        # Отправляем событие в Kafka
+        await send_user_event("user_updated", {
+            "user_id": result.get("user_id"),
+            "full_name": result.get("full_name")
+        })
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.post("/v1/client/change-password", status_code=status.HTTP_200_OK)
+async def change_password(request: Request, data: ChangePasswordRequest, authorization: str = Header(None)):
+    try:
+        token = await get_token_from_auth_header_or_cookie(request, authorization)
+        # Проксируем запрос к auth-service
+        await auth_client.change_password(data.old_password, data.new_password, token)
+
+        # Отправляем событие в Kafka
+        await send_auth_event("password_changed", {
+            "message": "Password changed successfully"
+        })
+
+        return {"message": "Password changed successfully"}
     except HTTPException:
         raise
     except Exception as e:

@@ -93,6 +93,18 @@ class AuthServiceClient:
         headers = {"Authorization": f"Bearer {token}"}
         return await self._make_request("PATCH", "/v1/client/switch-org", data, headers)
 
+    async def update_user_info(self, full_name: str, token: str) -> Dict[str, Any]:
+        """Обновить данные текущего пользователя"""
+        data = {"full_name": full_name}
+        headers = {"Authorization": f"Bearer {token}"}
+        return await self._make_request("PATCH", "/v1/client/update", data, headers)
+
+    async def change_password(self, old_password: str, new_password: str, token: str) -> Dict[str, Any]:
+        """Сменить пароль пользователя"""
+        data = {"old_password": old_password, "new_password": new_password}
+        headers = {"Authorization": f"Bearer {token}"}
+        return await self._make_request("POST", "/v1/client/change-password", data, headers)
+
     # Organization endpoints
     async def create_organization(self, name: str, slug: Optional[str], token: str) -> Dict[str, Any]:
         """Создать организацию"""
