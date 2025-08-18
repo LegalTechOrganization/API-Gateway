@@ -105,6 +105,26 @@ class MicroserviceClient:
 
             response.raise_for_status()
             return response.json()
+
+    async def get_user_subscription(self, access_token: str) -> Dict[str, Any]:
+        """Получает информацию о подписке пользователя"""
+        url = f"{self.base_urls['billing']}/internal/billing/subscription"
+        logger.info(f"Getting user subscription from billing service: {url}")
+        
+        # Создаем заголовки с токеном пользователя
+        headers = {
+            "Content-Type": "application/json",
+            "x-internal-key": self.internal_key,
+            "X-User-Data": json.dumps({"jwt_token": access_token})
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            logger.info(f"Billing subscription response status: {response.status_code}")
+            logger.info(f"Billing subscription response body: {response.text}")
+
+            response.raise_for_status()
+            return response.json()
             # try:
             #     response = await client.post(url, json={}, headers=headers)
             #     logger.info(f"Billing user init response status: {response.status_code}")

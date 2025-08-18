@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from services.microservice_client import microservice_client
 
-router = APIRouter()
+router = APIRouter(prefix="/v1")
 
 # Pydantic модели для запросов
 class CheckBalanceRequest(BaseModel):
@@ -51,6 +51,27 @@ class ApplyPlanResponse(BaseModel):
 class UserInitResponse(BaseModel):
     user_id: str
     status: str
+
+class PlanInfo(BaseModel):
+    plan_code: str
+    name: str
+    monthly_units: float
+    price_rub: float
+    period_days: Optional[int] = None
+    is_active: bool
+    created_at: str
+
+class SubscriptionResponse(BaseModel):
+    id: str
+    user_id: str
+    plan_code: str
+    started_at: str
+    expires_at: str
+    auto_renew: bool
+    status: str
+    last_payment_order: Optional[str] = None
+    created_at: str
+    plan: PlanInfo
 
 @router.post("/billing/quota/check", response_model=CheckBalanceResponse)
 async def quota_check(request_data: CheckBalanceRequest, request: Request):
@@ -116,4 +137,14 @@ async def init_user(request: Request):
         path="/internal/billing/user/init",
         request=request,
         data={}
+    )
+
+@router.get("/billing/subscription", response_model=SubscriptionResponse)
+async def get_subscription(request: Request):
+    """Получает информацию о подписке пользователя"""
+    return await microservice_client.proxy_request(
+        service_name="billing",
+        method="GET",
+        path="/internal/billing/subscription",
+        request=request
     ) 
