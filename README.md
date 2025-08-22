@@ -92,10 +92,52 @@ uvicorn main:app --host 0.0.0.0 --port 8002 --reload
 - `GET /auth/org/{id}` - Информация об организации
 - `GET /auth/org/{id}/members` - Участники организации
 
+### ChatGPT UI Server Endpoints (через Kafka)
+
+#### Разговоры (Conversations)
+- `POST /api/chat/conversations/` - Создание разговора
+- `GET /api/chat/conversations/` - Список разговоров
+- `GET /api/chat/conversations/{id}/` - Получение разговора
+- `PUT /api/chat/conversations/{id}/` - Обновление разговора
+- `DELETE /api/chat/conversations/{id}/` - Удаление разговора
+- `DELETE /api/chat/conversations/delete_all/` - Удаление всех разговоров
+
+#### Сообщения (Messages)
+- `GET /api/chat/messages/` - Список сообщений
+- `POST /api/chat/messages/` - Создание сообщения
+- `GET /api/chat/messages/{id}/` - Получение сообщения
+- `PUT /api/chat/messages/{id}/` - Обновление сообщения
+- `DELETE /api/chat/messages/{id}/` - Удаление сообщения
+
+#### ИИ Чат
+- `POST /api/conversation/` - Основной чат с ИИ (streaming)
+- `POST /api/gen_title/` - Генерация заголовка разговора
+- `POST /api/upload_conversations/` - Импорт разговоров
+
+#### Промпты (Prompts)
+- `GET /api/chat/prompts/` - Список промптов
+- `POST /api/chat/prompts/` - Создание промпта
+- `GET /api/chat/prompts/{id}/` - Получение промпта
+- `PUT /api/chat/prompts/{id}/` - Обновление промпта
+- `DELETE /api/chat/prompts/{id}/` - Удаление промпта
+- `DELETE /api/chat/prompts/delete_all/` - Удаление всех промптов
+
+#### Документы (Documents)
+- `GET /api/chat/embedding_document/` - Список документов
+- `POST /api/chat/embedding_document/` - Загрузка документа
+- `GET /api/chat/embedding_document/{id}/` - Получение документа
+- `PUT /api/chat/embedding_document/{id}/` - Обновление документа
+- `DELETE /api/chat/embedding_document/{id}/` - Удаление документа
+- `DELETE /api/chat/embedding_document/delete_all/` - Удаление всех документов
+
+#### Настройки
+- `GET /api/chat/settings/` - Получение настроек (без аутентификации)
+
 ## Kafka Topics
 
 Сервис отправляет события в следующие топики:
 
+### Общие события
 - **auth-events** - события аутентификации
   - `user_registered` - регистрация пользователя
   - `user_logged_in` - вход пользователя
@@ -117,6 +159,17 @@ uvicorn main:app --host 0.0.0.0 --port 8002 --reload
   - `member_removed` - удаление участника
   - `member_role_updated` - обновление роли участника
 
+### ChatGPT UI Server события
+- **chat-ui-conversations** - управление разговорами
+- **chat-ui-messages** - управление сообщениями
+- **chat-ui-ai-conversation** - основной чат с ИИ
+- **chat-ui-gen-title** - генерация заголовков
+- **chat-ui-upload-conversations** - импорт разговоров
+- **chat-ui-prompts** - управление промптами
+- **chat-ui-documents** - управление документами
+- **chat-ui-settings** - настройки
+- **chat-service-responses** - ответы от ChatGPT UI Server
+
 ## Переменные окружения
 
 | Переменная | Описание | Значение по умолчанию |
@@ -125,6 +178,17 @@ uvicorn main:app --host 0.0.0.0 --port 8002 --reload
 | `AUTH_SERVICE_URL` | URL auth-service | `http://auth-service:8001` |
 | `KAFKA_BOOTSTRAP_SERVERS` | Kafka серверы | `kafka:29092` |
 | `INTERNAL_SERVICE_KEY` | Секретный ключ для внутренних сервисов | `gateway-secret-key-2024` |
+| `CHAT_SERVICE_KAFKA_BOOTSTRAP_SERVERS` | Kafka серверы для ChatGPT UI Server | `kafka:29092` |
+| `CHAT_SERVICE_RESPONSES_TOPIC` | Топик ответов от ChatGPT UI Server | `chat-service-responses` |
+| `CHAT_SERVICE_EVENTS_TOPIC` | Топик событий ChatGPT UI Server | `chat-service-events` |
+| `CHAT_UI_CONVERSATIONS_TOPIC` | Топик для разговоров | `chat-ui-conversations` |
+| `CHAT_UI_MESSAGES_TOPIC` | Топик для сообщений | `chat-ui-messages` |
+| `CHAT_UI_AI_CONVERSATION_TOPIC` | Топик для AI разговоров | `chat-ui-ai-conversation` |
+| `CHAT_UI_GEN_TITLE_TOPIC` | Топик для генерации заголовков | `chat-ui-gen-title` |
+| `CHAT_UI_UPLOAD_CONVERSATIONS_TOPIC` | Топик для импорта разговоров | `chat-ui-upload-conversations` |
+| `CHAT_UI_PROMPTS_TOPIC` | Топик для промптов | `chat-ui-prompts` |
+| `CHAT_UI_DOCUMENTS_TOPIC` | Топик для документов | `chat-ui-documents` |
+| `CHAT_UI_SETTINGS_TOPIC` | Топик для настроек | `chat-ui-settings` |
 
 ## Разработка
 
@@ -161,6 +225,31 @@ API-Gateway/
 ### Логирование
 
 Все события отправляются в Kafka для дальнейшей обработки и аналитики.
+
+## Тестирование
+
+### Тесты интеграции с ChatGPT UI Server
+
+```bash
+# Запуск тестов интеграции
+python test_chat_ui_integration.py
+
+# Запуск тестов Kafka соединения
+python test_gateway_kafka_connection.py
+```
+
+### Тесты аутентификации
+
+```bash
+# Тесты JWT токенов
+python test_simple_jwt.py
+
+# Тесты валидации токенов
+python test_token_validation.py
+
+# Тесты регистрации
+python test_signup.py
+```
 
 ## Устранение неполадок
 
