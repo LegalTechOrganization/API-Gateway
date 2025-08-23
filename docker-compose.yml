@@ -63,11 +63,23 @@ services:
     depends_on:
       - db
       - kafka
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # КРИТИЧНО для подключения к внешним сервисам
     environment:
       DATABASE_URL: postgresql+asyncpg://user:password@db:5432/gateway_db
       INTERNAL_SERVICE_KEY: gateway-secret-key-2024
       AUTH_SERVICE_URL: http://host.docker.internal:8000
+      # Общий кластер Kafka (если используется в других частях)
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # Chat Service (точная конфигурация по опыту Billing Service)
+      CHAT_SERVICE_URL: http://host.docker.internal:8003
+      CHAT_SERVICE_INTERNAL_KEY: chat-service-secret-key
+      CHAT_SERVICE_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      CHAT_SERVICE_RESPONSES_TOPIC: chat-service-responses
+      CHAT_SERVICE_EVENTS_TOPIC: chat-service-events
+      # Дополнительные настройки (как рекомендовал Chat Service)
+      CHAT_SERVICE_REQUEST_TIMEOUT: "30000"  # 30 секунд
+      CHAT_SERVICE_RETRY_ATTEMPTS: "3"
 
 volumes:
   pgdata: 
