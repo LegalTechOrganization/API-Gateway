@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from routers import user, chat, tpl, billing, user, auth
+from routers import user, tpl, billing, user, auth, chat_srv
 from models.user import Base
 from db import engine
-from services.kafka_service import kafka_service
+from services.kafka_service import kafka_service, init_chat_kafka
 from middleware.url_middleware import URLMiddleware
 import asyncio
 
@@ -12,7 +12,8 @@ app = FastAPI()
 app.add_middleware(URLMiddleware)
 
 app.include_router(auth.router)
-app.include_router(chat.router)
+
+app.include_router(chat_srv.router)  # ← ДОБАВИЛИ chat-srv роутер
 app.include_router(tpl.router)
 app.include_router(billing.router)
 app.include_router(user.router)
@@ -24,6 +25,9 @@ async def on_startup():
     
     # Инициализируем Kafka producer
     await kafka_service.start_producer()
+    
+    # Инициализируем Chat Service Kafka интеграцию
+    await init_chat_kafka()
 
 @app.on_event("shutdown")
 async def on_shutdown():
