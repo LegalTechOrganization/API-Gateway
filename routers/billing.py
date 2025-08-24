@@ -71,6 +71,9 @@ class SubscriptionResponse(BaseModel):
     status: str
     last_payment_order: Optional[str] = None
     created_at: str
+    remaining_units: float
+    next_debit: str
+    tariff_properties: list[str]
     plan: PlanInfo
 
 @router.post("/billing/quota/check", response_model=CheckBalanceResponse)
